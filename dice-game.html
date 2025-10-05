@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>🎲 3 dés – 1 manche</title>
+  <title>🎲 3 dés – 1 manche (tour par tour)</title>
   <style>
     :root { color-scheme: light dark; }
     body{margin:0;min-height:100vh;display:grid;place-items:center;font-family:system-ui,Segoe UI,Roboto,sans-serif;background:#f8fafc;color:#0f172a}
@@ -16,97 +16,176 @@
     button.secondary{background:#0f172a}
     button.ghost{background:transparent;color:#0f172a;border:1px solid #cbd5e1}
     button:disabled{opacity:.6;cursor:not-allowed}
-    ul{padding-left:18px;margin:12px 0}
-    li{margin:4px 0}
     .muted{color:#64748b}
-    .grid{display:grid;grid-template-columns:repeat(3,38px);gap:6px;justify-content:center}
-    .die{display:grid;place-items:center;border-radius:8px;background:#0ea5e9;color:#fff;font-weight:700;height:38px}
+    .grid{display:grid;grid-template-columns:repeat(3,42px);gap:8px;justify-content:center;margin:8px 0}
+    .die{display:grid;place-items:center;border-radius:8px;background:#0ea5e9;color:#fff;font-weight:700;height:42px}
     .card{border:1px solid #e2e8f0;border-radius:12px;padding:12px;margin-top:10px;background:#fafcff}
     .actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:14px}
     footer{margin-top:10px;text-align:center;font-size:12px;color:#94a3b8}
+    ol.rank{padding-left:18px}
   </style>
 </head>
 <body>
-  <main class="app" role="application" aria-label="Jeu des 3 dés – 1 manche">
+  <main class="app" role="application" aria-label="Jeu des 3 dés – 1 manche (tour par tour)">
     <h1>🎲 3 dés – 1 manche</h1>
-    <p class="lead">Chaque joueur lance 3 dés une seule fois. <strong>Si les 3 dés sont identiques, le score est doublé.</strong></p>
+    <p class="lead">Chaque joueur lance 3 dés <strong>à son tour</strong>. Si les 3 dés sont identiques, le score est doublé.</p>
 
     <!-- Setup -->
     <section id="setup">
       <div class="row">
         <label for="players"><strong>Nombre de joueurs (1 à 5) :</strong></label>
         <input id="players" type="number" min="1" max="5" value="2" />
-        <button id="start">Commencer</button>
+        <button id="start">Démarrer la manche</button>
       </div>
-      <p class="muted">Astuce : laissez 2 joueurs pour tester rapidement.</p>
+      <p class="muted">Conseil : commencez à 2 pour tester vite.</p>
+    </section>
+
+    <!-- Turn by turn -->
+    <section id="turn" hidden>
+      <div class="card">
+        <p id="turnLabel" style="margin:0 0 6px;"><strong>Joueur 1</strong>, à toi de lancer.</p>
+        <div class="grid" aria-live="polite">
+          <div class="die" id="d1">?</div>
+          <div class="die" id="d2">?</div>
+          <div class="die" id="d3">?</div>
+        </div>
+        <p id="turnInfo" class="muted" style="text-align:center;margin:6px 0 0;">Clique sur « Lancer les dés ».</p>
+        <div class="actions">
+          <button id="roll">Lancer les dés</button>
+          <button id="next" class="secondary" disabled>Joueur suivant</button>
+        </div>
+      </div>
     </section>
 
     <!-- Results -->
     <section id="results" hidden>
-      <div id="round"></div>
-      <ul id="scores"></ul>
-
-      <div class="actions">
-        <button id="replay">Rejouer</button>
-        <!-- Remplace l’URL ci-dessous par TA page Wix d’accueil -->
-        <a id="quit" class="ghost" href="https://tonsite.wixsite.com/nomdusite" target="_top" style="text-decoration:none;display:inline-block;padding:10px 14px;border-radius:10px;">Quitter</a>
+      <div class="card">
+        <p><strong>Classement final (1 manche)</strong></p>
+        <ol id="ranking" class="rank"></ol>
+        <div class="actions">
+          <button id="replay">Rejouer</button>
+          <!-- Remplace l’URL ci-dessous par TA page Wix d’accueil -->
+          <a id="quit" class="ghost" href="https://tonsite.wixsite.com/nomdusite" target="_top" style="text-decoration:none;display:inline-block;padding:10px 14px;border-radius:10px;">Quitter</a>
+        </div>
       </div>
     </section>
 
-    <footer>Règles : somme des 3 dés. Triplé → score ×2.</footer>
+    <footer>Règles : somme des 3 dés. Triplé → score ×2. Un seul lancer par joueur.</footer>
   </main>
 
   <script>
-    const $ = sel => document.querySelector(sel);
-    const startBtn = $('#start');
+    const $ = s => document.querySelector(s);
+    // UI
     const setup = $('#setup');
+    const turn = $('#turn');
     const results = $('#results');
-    const list = $('#scores');
-    const roundBox = $('#round');
+    const startBtn = $('#start');
+    const rollBtn = $('#roll');
+    const nextBtn = $('#next');
+    const turnLabel = $('#turnLabel');
+    const turnInfo = $('#turnInfo');
+    const d1 = $('#d1'), d2 = $('#d2'), d3 = $('#d3');
+    const ranking = $('#ranking');
+
+    // State
+    let totalPlayers = 2;
+    let current = 1;
+    let done = [];
+    let locked = false; // prevent multiple rolls
 
     startBtn.addEventListener('click', () => {
-      const n = clamp(parseInt($('#players').value || '2', 10), 1, 5);
-      playOnce(n);
+      totalPlayers = clamp(parseInt($('#players').value || '2', 10), 1, 5);
+      current = 1;
+      done = [];
+      setup.hidden = true;
+      results.hidden = true;
+      turn.hidden = false;
+      resetTurnUI();
+      updateTurnLabel();
+    });
+
+    rollBtn.addEventListener('click', () => {
+      if (locked) return;
+      locked = true;
+      // roll 3 dice
+      const dice = [roll(), roll(), roll()];
+      animateDice(dice, () => {
+        const base = dice.reduce((a,b)=>a+b,0);
+        const triple = (dice[0]===dice[1] && dice[1]===dice[2]);
+        const sum = triple ? base * 2 : base;
+        done.push({ player: current, dice, base, sum, triple });
+        turnInfo.textContent = triple
+          ? `Triplé ! Base ${base} × 2 = ${sum}.`
+          : `Total = ${sum}.`;
+        nextBtn.disabled = false;
+      });
+    });
+
+    nextBtn.addEventListener('click', () => {
+      if (current < totalPlayers) {
+        current++;
+        resetTurnUI();
+        updateTurnLabel();
+      } else {
+        // show results
+        turn.hidden = true;
+        showResults();
+        results.hidden = false;
+      }
     });
 
     $('#replay').addEventListener('click', () => location.reload());
 
-    function playOnce(nPlayers){
-      const rows = [];
-      for(let i=1;i<=nPlayers;i++){
-        const dice = [roll(), roll(), roll()];
-        const base = dice.reduce((a,b)=>a+b,0);
-        const triple = (dice[0]===dice[1] && dice[1]===dice[2]);
-        const sum = triple ? base*2 : base;
-        rows.push({i, dice, base, sum, triple});
-      }
-      rows.sort((a,b)=> b.sum - a.sum);
+    function resetTurnUI(){
+      locked = false;
+      d1.textContent = d2.textContent = d3.textContent = '?';
+      nextBtn.disabled = true;
+      turnInfo.textContent = 'Clique sur « Lancer les dés ».';
+    }
 
-      // show per-player card + overall ranking
-      list.innerHTML = rows.map((r,idx)=> `
+    function updateTurnLabel(){
+      turnLabel.innerHTML = `<strong>Joueur ${current}</strong>, à toi de lancer. (${current}/${totalPlayers})`;
+    }
+
+    function showResults(){
+      const rows = [...done].sort((a,b)=> b.sum - a.sum);
+      ranking.innerHTML = rows.map((r,idx)=> `
         <li>
-          <div class="card">
-            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-              <strong>#${idx+1} — Joueur ${r.i}</strong>
-              <span class="muted">${r.triple ? 'Triplé ! Score doublé' : 'Score normal'}</span>
-            </div>
-            <div class="grid" aria-label="Dés du joueur ${r.i}">
-              ${r.dice.map(d=>`<div class="die">${d}</div>`).join('')}
-            </div>
-            <div style="text-align:center;margin-top:8px;">
-              <span>Total : <strong>${r.sum}</strong> ${r.triple ? `(base ${r.base} × 2)` : ''}</span>
-            </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:4px;">
+            <strong>#${idx+1} — Joueur ${r.player}</strong>
+            <span class="muted">${r.triple ? 'Triplé ! Score doublé' : 'Score normal'}</span>
+          </div>
+          <div class="grid" aria-label="Dés du joueur ${r.player}">
+            ${r.dice.map(n=>`<div class="die">${n}</div>`).join('')}
+          </div>
+          <div style="text-align:left;margin-top:6px;">
+            <span>Total : <strong>${r.sum}</strong> ${r.triple ? `(base ${r.base} × 2)` : ''}</span>
           </div>
         </li>
       `).join('');
-
-      roundBox.innerHTML = `<p><strong>Classement final (1 manche)</strong></p>`;
-      setup.hidden = true;
-      results.hidden = false;
     }
 
     function roll(){ return Math.floor(Math.random()*6)+1; }
     function clamp(v,min,max){ return Math.max(min, Math.min(max, v)); }
+
+    // quick visual hint when rolling
+    function animateDice(targets, onEnd){
+      const faces = ['•','·','∙','*','◦','•'];
+      let t = 0;
+      const id = setInterval(()=>{
+        d1.textContent = faces[t%faces.length];
+        d2.textContent = faces[(t+1)%faces.length];
+        d3.textContent = faces[(t+2)%faces.length];
+        t++;
+        if (t>10){
+          clearInterval(id);
+          d1.textContent = targets[0];
+          d2.textContent = targets[1];
+          d3.textContent = targets[2];
+          onEnd && onEnd();
+        }
+      }, 60);
+    }
   </script>
 </body>
 </html>
